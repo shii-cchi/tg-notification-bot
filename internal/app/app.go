@@ -2,8 +2,10 @@ package app
 
 import (
 	"log"
-	"tg-notification-bot/internal/bot"
 	"tg-notification-bot/internal/config"
+	"tg-notification-bot/internal/message_handler"
+	"tg-notification-bot/internal/rabbitmq"
+	"tg-notification-bot/internal/service"
 )
 
 func RunBot() {
@@ -15,13 +17,26 @@ func RunBot() {
 
 	log.Println("config has been loaded successfully")
 
-	notificationBot, updatesChan, err := bot.NewBot(cfg.BotToken)
+	rabbit, err := rabbitmq.InitRabbit(cfg.RabbitMQURL, cfg.QueueConfigs)
+
+	if err != nil {
+		log.Fatalf("error init rabbitmq: %s\n", err)
+	}
+
+	defer rabbit.Close()
+
+	messageService := service.NewMessageService(rabbit)
+
+	messageHandler, err := message_handler.NewMessageHandler(cfg.BotToken, messageService)
 
 	if err != nil {
 		log.Fatal("error creating bot")
 	}
 
-	log.Println("bot has been created successfully")
+	log.Println("initialization was a complete success")
+	log.Println("starting to handle message")
 
-	bot.HandleMessage(notificationBot, updatesChan)
+	go messageHandler.Notify()
+
+	messageHandler.HandleMessage()
 }

@@ -1,24 +1,31 @@
-package bot
+package message_handler
 
 import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"math/rand"
+	"tg-notification-bot/internal/service"
 	"time"
 )
 
-func NewBot(token string) (*tgbotapi.BotAPI, tgbotapi.UpdatesChannel, error) {
+type MessageHandler struct {
+	Bot            *tgbotapi.BotAPI
+	UpdatesChannel tgbotapi.UpdatesChannel
+	MessageService *service.MessageService
+}
+
+func NewMessageHandler(token string, messageService *service.MessageService) (*MessageHandler, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 10
 
 	commands := []tgbotapi.BotCommand{
-		{Command: "start", Description: "Start using notification bot"},
+		{Command: "start", Description: "Start using notification message_handler"},
 		{Command: "add_task", Description: "Add task in queue"},
 	}
 
@@ -27,18 +34,22 @@ func NewBot(token string) (*tgbotapi.BotAPI, tgbotapi.UpdatesChannel, error) {
 	_, err = bot.Request(setCommandsConfig)
 
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	updatesChan := bot.GetUpdatesChan(u)
 
-	return bot, updatesChan, nil
+	return &MessageHandler{
+		Bot:            bot,
+		UpdatesChannel: updatesChan,
+		MessageService: messageService,
+	}, nil
 }
 
-func HandleMessage(bot *tgbotapi.BotAPI, updatesChan tgbotapi.UpdatesChannel) {
+func (mh *MessageHandler) HandleMessage() {
 	isAddingTask := false
 
-	for update := range updatesChan {
+	for update := range mh.UpdatesChannel {
 		if update.Message == nil {
 			continue
 		}
@@ -63,14 +74,32 @@ func HandleMessage(bot *tgbotapi.BotAPI, updatesChan tgbotapi.UpdatesChannel) {
 
 		default:
 			if isAddingTask {
-				msg = tgbotapi.NewMessage(update.Message.Chat.ID, "задача добавлена: "+update.Message.Text)
-				isAddingTask = false
-				log.Printf("A task has been received - %s\n", update.Message.Text)
+				err := mh.MessageService.AddTask(update.Message.Text, update.Message.Chat.ID)
+
+				if err != nil {
+					msg = tgbotapi.NewMessage(update.Message.Chat.ID, "ошибка добавления задачи(")
+				} else {
+					msg = tgbotapi.NewMessage(update.Message.Chat.ID, "задача добавлена: "+update.Message.Text)
+					isAddingTask = false
+					log.Printf("A task has been received - %s\n", update.Message.Text)
+				}
 			} else {
 				msg = tgbotapi.NewMessage(update.Message.Chat.ID, "такой команды нет(")
 			}
 		}
 
-		bot.Send(msg)
+		mh.Bot.Send(msg)
+	}
+}
+
+func (mh *MessageHandler) Notify() {
+	for {
+		notification := mh.MessageService.GetNotification()
+
+		if notification.Task != "" {
+			msg := tgbotapi.NewMessage(notification.ChatID, "пора "+notification.Task)
+
+			mh.Bot.Send(msg)
+		}
 	}
 }
