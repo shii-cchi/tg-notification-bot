@@ -18,7 +18,7 @@ type Queue struct {
 	TTL   int
 }
 
-func InitRabbit(url string, queueConfigs map[string]int) (*Rabbit, error) {
+func InitRabbit(url string, queueTTLs []int) (*Rabbit, error) {
 	conn, err := amqp.Dial(url)
 
 	if err != nil {
@@ -48,15 +48,15 @@ func InitRabbit(url string, queueConfigs map[string]int) (*Rabbit, error) {
 
 	queues = append(queues, Queue{Queue: outputQueue, TTL: 0})
 
-	for name, ttl := range queueConfigs {
+	for _, ttl := range queueTTLs {
 		args := amqp.Table{
 			"x-dead-letter-exchange":    "",
 			"x-dead-letter-routing-key": "output_queue",
-			"x-message-ttl":             int32(ttl),
+			"x-message-ttl":             int32(ttl) * 60 * 1000,
 		}
 
 		queue, err := ch.QueueDeclare(
-			name,
+			fmt.Sprintf("queue_%dmin", ttl),
 			true,
 			false,
 			false,
@@ -65,10 +65,10 @@ func InitRabbit(url string, queueConfigs map[string]int) (*Rabbit, error) {
 		)
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to create %s\n", name)
+			return nil, fmt.Errorf("failed to create queue_%dmin\n", ttl)
 		}
 
-		queues = append(queues, Queue{Queue: queue, TTL: ttl})
+		queues = append(queues, Queue{Queue: queue, TTL: ttl * 60 * 1000})
 	}
 
 	return &Rabbit{

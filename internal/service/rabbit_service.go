@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"tg-notification-bot/internal/model"
 	"tg-notification-bot/internal/rabbitmq"
 	"time"
@@ -27,9 +28,11 @@ func (rs *RabbitService) Publish(task model.Task) error {
 
 	queues := rs.rabbit.GetQueueList()
 
-	for _, queue := range queues {
-		if task.TaskTimeMs <= queue.TTL {
-			err = rs.rabbit.Publish(queue.Queue, msg)
+	errorMarginMs := 1000
+
+	for i := len(queues) - 1; i >= 0; i-- {
+		if task.TaskTimeMs >= queues[i].TTL-errorMarginMs {
+			err = rs.rabbit.Publish(queues[i].Queue, msg)
 
 			if err != nil {
 				return fmt.Errorf("error publishing message: %s\n", err)
@@ -39,7 +42,7 @@ func (rs *RabbitService) Publish(task model.Task) error {
 		}
 	}
 
-	err = rs.rabbit.Publish(queues[len(queues)-1].Queue, msg)
+	err = rs.rabbit.Publish(queues[0].Queue, msg)
 
 	if err != nil {
 		return fmt.Errorf("error publishing message: %s\n", err)
@@ -65,7 +68,10 @@ func (rs *RabbitService) Consume() (model.Task, error) {
 
 	const toleranceMs = 59 * 1000
 
-	if msg.TaskTimeMs-int(time.Now().Sub(msg.CreatedAt).Milliseconds()) <= toleranceMs {
+	fmt.Println(msg.TaskTimeMs, int(time.Now().Sub(msg.CreatedAt).Milliseconds()))
+
+	if msg.TaskTimeMs <= int(time.Now().Sub(msg.CreatedAt).Milliseconds())-toleranceMs {
+		log.Printf("Notify about a task %s\n", msg.Task)
 		return msg, nil
 	} else {
 		msg.TaskTimeMs -= int(time.Now().Sub(msg.CreatedAt).Milliseconds())

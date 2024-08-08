@@ -17,7 +17,7 @@ func RunBot() {
 
 	log.Println("config has been loaded successfully")
 
-	rabbit, err := rabbitmq.InitRabbit(cfg.RabbitMQURL, cfg.QueueConfigs)
+	rabbit, err := rabbitmq.InitRabbit(cfg.RabbitMQURL, cfg.QueueTTLs)
 
 	if err != nil {
 		log.Fatalf("error init rabbitmq: %s\n", err)

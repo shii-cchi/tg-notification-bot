@@ -2,16 +2,25 @@ package config
 
 import (
 	"errors"
+	"github.com/joho/godotenv"
 	"os"
+	"strconv"
+	"strings"
 )
 
 type Config struct {
-	BotToken     string
-	RabbitMQURL  string
-	QueueConfigs map[string]int
+	BotToken    string
+	RabbitMQURL string
+	QueueTTLs   []int
 }
 
 func LoadConfig() (*Config, error) {
+	err := godotenv.Load(".env")
+
+	if err != nil {
+		return nil, err
+	}
+
 	botToken := os.Getenv("BOT_TOKEN")
 
 	if botToken == "" {
@@ -24,19 +33,25 @@ func LoadConfig() (*Config, error) {
 		return nil, errors.New("RABBIT_MQ_URL parameter is not defined")
 	}
 
-	queueConfigs := map[string]int{
-		"queue_1min":  1 * 60 * 1000,
-		"queue_5min":  5 * 60 * 1000,
-		"queue_10min": 10 * 60 * 1000,
-		"queue_30min": 30 * 60 * 1000,
-		"queue_1hour": 60 * 60 * 1000,
-		"queue_2hour": 120 * 60 * 1000,
-		"queue_3hour": 180 * 60 * 1000,
+	queueTTLsStr := os.Getenv("QUEUE_TTLS")
+
+	if queueTTLsStr == "" {
+		return nil, errors.New("QUEUE_TTLS parameter is not defined")
+	}
+
+	ttlsStr := strings.Split(queueTTLsStr, ",")
+	var queueTTLs []int
+	for _, ttlStr := range ttlsStr {
+		ttl, err := strconv.Atoi(ttlStr)
+		if err != nil {
+			return nil, errors.New("error parsing QUEUE_TTLS params")
+		}
+		queueTTLs = append(queueTTLs, ttl)
 	}
 
 	return &Config{
-		BotToken:     botToken,
-		RabbitMQURL:  rabbitMQURL,
-		QueueConfigs: queueConfigs,
+		BotToken:    botToken,
+		RabbitMQURL: rabbitMQURL,
+		QueueTTLs:   queueTTLs,
 	}, nil
 }
