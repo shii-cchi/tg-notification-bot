@@ -19,6 +19,8 @@ func NewRabbitService(r *rabbitmq.Rabbit) *RabbitService {
 	}
 }
 
+const errorMarginMs = 1000
+
 func (rs *RabbitService) Publish(task model.Task) error {
 	msg, err := json.Marshal(task)
 
@@ -28,27 +30,13 @@ func (rs *RabbitService) Publish(task model.Task) error {
 
 	queues := rs.rabbit.GetQueueList()
 
-	errorMarginMs := 1000
-
 	for i := len(queues) - 1; i >= 0; i-- {
 		if task.TaskTimeMs >= queues[i].TTL-errorMarginMs {
-			err = rs.rabbit.Publish(queues[i].Queue, msg)
-
-			if err != nil {
-				return fmt.Errorf("error publishing message: %s\n", err)
-			}
-
-			return nil
+			return rs.rabbit.Publish(queues[i].Queue, msg)
 		}
 	}
 
-	err = rs.rabbit.Publish(queues[0].Queue, msg)
-
-	if err != nil {
-		return fmt.Errorf("error publishing message: %s\n", err)
-	}
-
-	return nil
+	return rs.rabbit.Publish(queues[0].Queue, msg)
 }
 
 func (rs *RabbitService) Consume() (model.Task, error) {
@@ -58,35 +46,37 @@ func (rs *RabbitService) Consume() (model.Task, error) {
 		return model.Task{}, err
 	}
 
-	msg := model.Task{}
+	var msg model.Task
 
-	err = json.Unmarshal(msgByte, &msg)
-
-	if err != nil {
+	if err = json.Unmarshal(msgByte, &msg); err != nil {
 		return model.Task{}, err
 	}
 
-	fmt.Println(msg.TaskTimeMs, int(time.Now().Sub(msg.CreatedAt).Milliseconds()))
+	queues := rs.rabbit.GetQueueList()
 
-	if msg.TaskTimeMs <= int(time.Now().Sub(msg.CreatedAt).Milliseconds()) {
+	if rs.isTaskDue(msg) || msg.TaskTimeMs < queues[1].TTL {
 		log.Printf("notify about a task %s\n", msg.Task)
 		return msg, nil
-	} else {
-		if msg.TaskTimeMs < 30000 {
-			log.Printf("notify about a task %s\n", msg.Task)
-			return msg, nil
-		}
-
-		log.Printf("task %s should not be completed yet\n", msg.Task)
-		msg.TaskTimeMs -= int(time.Now().Sub(msg.CreatedAt).Milliseconds())
-		msg.CreatedAt = time.Now()
-
-		err = rs.Publish(msg)
-
-		if err != nil {
-			return model.Task{}, err
-		}
-
-		return model.Task{}, nil
 	}
+
+	return rs.requeueTask(msg)
+}
+
+func (rs *RabbitService) isTaskDue(msg model.Task) bool {
+	elapsedTime := int(time.Now().Sub(msg.CreatedAt).Milliseconds())
+	return msg.TaskTimeMs <= elapsedTime
+}
+
+func (rs *RabbitService) requeueTask(msg model.Task) (model.Task, error) {
+	log.Printf("task %s should not be completed yet, requeued\n", msg.Task)
+
+	elapsedTime := int(time.Now().Sub(msg.CreatedAt).Milliseconds())
+	msg.TaskTimeMs -= elapsedTime
+	msg.CreatedAt = time.Now()
+
+	if err := rs.Publish(msg); err != nil {
+		return model.Task{}, err
+	}
+
+	return model.Task{}, nil
 }

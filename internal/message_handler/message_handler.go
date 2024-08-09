@@ -54,45 +54,20 @@ func (mh *MessageHandler) HandleMessage() {
 			continue
 		}
 
-		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-		var msg tgbotapi.MessageConfig
-
 		switch update.Message.Text {
 		case "/start":
-			msg = tgbotapi.NewMessage(update.Message.Chat.ID, startMessages[rng.Intn(len(startMessages))])
-			sticker := tgbotapi.NewSticker(update.Message.Chat.ID, tgbotapi.FileID(startSticker))
-
-			mh.Bot.Send(msg)
-			mh.Bot.Send(sticker)
+			mh.handleStart(update.Message.Chat.ID)
 
 		case "/add_task":
 			isAddingTask = true
-			msg = tgbotapi.NewMessage(update.Message.Chat.ID, addTaskMessage)
-			mh.Bot.Send(msg)
+			mh.handleAddTaskCommand(update.Message.Chat.ID)
 
 		default:
 			if isAddingTask {
-				log.Printf("starting adding task - %s in queue\n", update.Message.Text)
-				err := mh.MessageService.AddTask(update.Message.Text, update.Message.Chat.ID)
-
-				if err != nil {
-					msg = tgbotapi.NewMessage(update.Message.Chat.ID, errMessage)
-					mh.Bot.Send(msg)
-				} else {
-					log.Printf("task - %s has been added in queue\n", update.Message.Text)
-					msg = tgbotapi.NewMessage(update.Message.Chat.ID, successAddMessage+update.Message.Text)
-					sticker := tgbotapi.NewSticker(update.Message.Chat.ID, tgbotapi.FileID(successAddSticker))
-					isAddingTask = false
-					mh.Bot.Send(msg)
-					mh.Bot.Send(sticker)
-				}
-
+				mh.handleTaskAddition(update.Message.Chat.ID, update.Message.Text)
+				isAddingTask = false
 			} else {
-				msg = tgbotapi.NewMessage(update.Message.Chat.ID, noCommandMessage)
-				sticker := tgbotapi.NewSticker(update.Message.Chat.ID, tgbotapi.FileID(noCommandSticker))
-				mh.Bot.Send(msg)
-				mh.Bot.Send(sticker)
+				mh.handleUnknownCommand(update.Message.Chat.ID)
 			}
 		}
 	}
@@ -110,7 +85,73 @@ func (mh *MessageHandler) Notify() {
 			log.Printf("sending notification %s\n", notification.Task)
 
 			msg := tgbotapi.NewMessage(notification.ChatID, notificationMessage+notification.Task)
-			mh.Bot.Send(msg)
+
+			if _, err := mh.Bot.Send(msg); err != nil {
+				log.Printf("error sending notification message: %v", err)
+			}
 		}
+	}
+}
+
+func (mh *MessageHandler) handleStart(chatID int64) {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	msg := tgbotapi.NewMessage(chatID, startMessages[rng.Intn(len(startMessages))])
+	sticker := tgbotapi.NewSticker(chatID, tgbotapi.FileID(startSticker))
+
+	if _, err := mh.Bot.Send(msg); err != nil {
+		log.Printf("error sending start message: %v", err)
+	}
+
+	if _, err := mh.Bot.Send(sticker); err != nil {
+		log.Printf("error sending start sticker: %v", err)
+	}
+}
+
+func (mh *MessageHandler) handleAddTaskCommand(chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, addTaskMessage)
+
+	if _, err := mh.Bot.Send(msg); err != nil {
+		log.Printf("error sending add task message: %v", err)
+	}
+}
+
+func (mh *MessageHandler) handleTaskAddition(chatID int64, task string) {
+	log.Printf("starting adding task - %s in queue\n", task)
+
+	err := mh.MessageService.AddTask(task, chatID)
+
+	if err != nil {
+		msg := tgbotapi.NewMessage(chatID, errMessage)
+
+		if _, err = mh.Bot.Send(msg); err != nil {
+			log.Printf("error sending error message: %v", err)
+		}
+
+	} else {
+		log.Printf("task - %s has been added in queue\n", task)
+		msg := tgbotapi.NewMessage(chatID, successAddMessage+task)
+		sticker := tgbotapi.NewSticker(chatID, tgbotapi.FileID(successAddSticker))
+
+		if _, err = mh.Bot.Send(msg); err != nil {
+			log.Printf("error sending success add task message: %v", err)
+		}
+
+		if _, err = mh.Bot.Send(sticker); err != nil {
+			log.Printf("error sending success add task sticker: %v", err)
+		}
+	}
+}
+
+func (mh *MessageHandler) handleUnknownCommand(chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, unknownCommandMessage)
+	sticker := tgbotapi.NewSticker(chatID, tgbotapi.FileID(unknownCommandSticker))
+
+	if _, err := mh.Bot.Send(msg); err != nil {
+		log.Printf("error sending unknown command message: %v", err)
+	}
+
+	if _, err := mh.Bot.Send(sticker); err != nil {
+		log.Printf("error sending unknown command sticker: %v", err)
 	}
 }
