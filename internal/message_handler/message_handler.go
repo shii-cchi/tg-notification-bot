@@ -56,49 +56,60 @@ func (mh *MessageHandler) HandleMessage() {
 
 		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-		startMessages := []string{
-			"пиветики,будут новые задачи?",
-			"жду новые задачи^-^",
-			"привет-привет,давай задачи",
-		}
-
 		var msg tgbotapi.MessageConfig
 
 		switch update.Message.Text {
 		case "/start":
 			msg = tgbotapi.NewMessage(update.Message.Chat.ID, startMessages[rng.Intn(len(startMessages))])
+			sticker := tgbotapi.NewSticker(update.Message.Chat.ID, tgbotapi.FileID(startSticker))
+
+			mh.Bot.Send(msg)
+			mh.Bot.Send(sticker)
 
 		case "/add_task":
 			isAddingTask = true
-			msg = tgbotapi.NewMessage(update.Message.Chat.ID, "введи задачу в формате: задача - время, через которое напомнить о ней")
+			msg = tgbotapi.NewMessage(update.Message.Chat.ID, addTaskMessage)
+			mh.Bot.Send(msg)
 
 		default:
 			if isAddingTask {
+				log.Printf("starting adding task - %s in queue\n", update.Message.Text)
 				err := mh.MessageService.AddTask(update.Message.Text, update.Message.Chat.ID)
 
 				if err != nil {
-					msg = tgbotapi.NewMessage(update.Message.Chat.ID, "ошибка добавления задачи(")
+					msg = tgbotapi.NewMessage(update.Message.Chat.ID, errMessage)
+					mh.Bot.Send(msg)
 				} else {
-					msg = tgbotapi.NewMessage(update.Message.Chat.ID, "задача добавлена: "+update.Message.Text)
+					log.Printf("task - %s has been added in queue\n", update.Message.Text)
+					msg = tgbotapi.NewMessage(update.Message.Chat.ID, successAddMessage+update.Message.Text)
+					sticker := tgbotapi.NewSticker(update.Message.Chat.ID, tgbotapi.FileID(successAddSticker))
 					isAddingTask = false
-					log.Printf("A task has been received - %s\n", update.Message.Text)
+					mh.Bot.Send(msg)
+					mh.Bot.Send(sticker)
 				}
+
 			} else {
-				msg = tgbotapi.NewMessage(update.Message.Chat.ID, "такой команды нет(")
+				msg = tgbotapi.NewMessage(update.Message.Chat.ID, noCommandMessage)
+				sticker := tgbotapi.NewSticker(update.Message.Chat.ID, tgbotapi.FileID(noCommandSticker))
+				mh.Bot.Send(msg)
+				mh.Bot.Send(sticker)
 			}
 		}
-
-		mh.Bot.Send(msg)
 	}
 }
 
 func (mh *MessageHandler) Notify() {
 	for {
+		log.Println("waiting notification")
+
 		notification := mh.MessageService.GetNotification()
 
-		if notification.Task != "" {
-			msg := tgbotapi.NewMessage(notification.ChatID, "пора "+notification.Task)
+		log.Printf("getting notification %s\n", notification.Task)
 
+		if notification.Task != "" {
+			log.Printf("sending notification %s\n", notification.Task)
+
+			msg := tgbotapi.NewMessage(notification.ChatID, notificationMessage+notification.Task)
 			mh.Bot.Send(msg)
 		}
 	}

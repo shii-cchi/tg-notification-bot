@@ -8,9 +8,10 @@ import (
 )
 
 type Rabbit struct {
-	conn    *amqp.Connection
-	channel *amqp.Channel
-	queues  []Queue
+	conn            *amqp.Connection
+	channel         *amqp.Channel
+	queues          []Queue
+	deliveryChannel <-chan amqp.Delivery
 }
 
 type Queue struct {
@@ -52,11 +53,11 @@ func InitRabbit(url string, queueTTLs []int) (*Rabbit, error) {
 		args := amqp.Table{
 			"x-dead-letter-exchange":    "",
 			"x-dead-letter-routing-key": "output_queue",
-			"x-message-ttl":             int32(ttl) * 60 * 1000,
+			"x-message-ttl":             int32(ttl) * 1000,
 		}
 
 		queue, err := ch.QueueDeclare(
-			fmt.Sprintf("queue_%dmin", ttl),
+			fmt.Sprintf("queue_%dmin", ttl/60),
 			true,
 			false,
 			false,
@@ -65,16 +66,31 @@ func InitRabbit(url string, queueTTLs []int) (*Rabbit, error) {
 		)
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to create queue_%dmin\n", ttl)
+			return nil, fmt.Errorf("failed to create queue_%dmin\n", ttl/60)
 		}
 
-		queues = append(queues, Queue{Queue: queue, TTL: ttl * 60 * 1000})
+		queues = append(queues, Queue{Queue: queue, TTL: ttl * 1000})
+	}
+
+	deliveryChan, err := ch.Consume(
+		queues[0].Queue.Name,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+
+	if err != nil {
+		return nil, err
 	}
 
 	return &Rabbit{
-		conn:    conn,
-		channel: ch,
-		queues:  queues,
+		conn:            conn,
+		channel:         ch,
+		queues:          queues,
+		deliveryChannel: deliveryChan,
 	}, nil
 }
 
@@ -99,28 +115,17 @@ func (r *Rabbit) Publish(queue amqp.Queue, msg []byte) error {
 		return err
 	}
 
-	log.Printf("Sent msg: %s\n into queue %s\n", string(msg), queue.Name)
+	log.Printf("sent msg: %s\n into queue %s\n", string(msg), queue.Name)
 
 	return nil
 }
 
 func (r *Rabbit) Consume() ([]byte, error) {
-	deliveryChan, err := r.channel.Consume(
-		r.queues[0].Queue.Name,
-		"",
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
+	log.Println("waiting message from output queue")
 
-	if err != nil {
-		return nil, err
-	}
+	delivery := <-r.deliveryChannel
 
-	delivery := <-deliveryChan
-	log.Printf("Received a message: %s\n", delivery.Body)
+	log.Printf("received a message: %s\n", delivery.Body)
 
 	return delivery.Body, nil
 }

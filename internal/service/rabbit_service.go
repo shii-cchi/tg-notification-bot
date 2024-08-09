@@ -66,14 +66,18 @@ func (rs *RabbitService) Consume() (model.Task, error) {
 		return model.Task{}, err
 	}
 
-	const toleranceMs = 59 * 1000
-
 	fmt.Println(msg.TaskTimeMs, int(time.Now().Sub(msg.CreatedAt).Milliseconds()))
 
-	if msg.TaskTimeMs <= int(time.Now().Sub(msg.CreatedAt).Milliseconds())-toleranceMs {
-		log.Printf("Notify about a task %s\n", msg.Task)
+	if msg.TaskTimeMs <= int(time.Now().Sub(msg.CreatedAt).Milliseconds()) {
+		log.Printf("notify about a task %s\n", msg.Task)
 		return msg, nil
 	} else {
+		if msg.TaskTimeMs < 30000 {
+			log.Printf("notify about a task %s\n", msg.Task)
+			return msg, nil
+		}
+
+		log.Printf("task %s should not be completed yet\n", msg.Task)
 		msg.TaskTimeMs -= int(time.Now().Sub(msg.CreatedAt).Milliseconds())
 		msg.CreatedAt = time.Now()
 
