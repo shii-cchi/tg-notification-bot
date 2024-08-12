@@ -1,8 +1,12 @@
 package app
 
 import (
+	"database/sql"
+	"fmt"
+	_ "github.com/lib/pq"
 	"log"
 	"tg-notification-bot/internal/config"
+	"tg-notification-bot/internal/database"
 	"tg-notification-bot/internal/message_handler"
 	"tg-notification-bot/internal/rabbitmq"
 	"tg-notification-bot/internal/service"
@@ -25,7 +29,15 @@ func RunBot() {
 
 	defer rabbit.Close()
 
-	messageService := service.NewMessageService(rabbit)
+	conn, err := sql.Open("postgres", fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=disable", cfg.DbUser, cfg.DbPassword, cfg.DbHost, cfg.DbPort, cfg.DbName))
+
+	if err != nil {
+		log.Fatalf("error connecting to db: %s\n", err)
+	}
+
+	queries := database.New(conn)
+
+	messageService := service.NewMessageService(rabbit, queries)
 
 	messageHandler, err := message_handler.NewMessageHandler(cfg.BotToken, messageService)
 

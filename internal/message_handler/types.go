@@ -1,16 +1,20 @@
 package message_handler
 
 var startMessages = []string{
-	"пиветики,будут новые задачи?",
-	"жду новые задачи^-^",
-	"привет-привет,давай задачи",
+	"пиветики^-^",
+	"привет^^",
+	"привет-привет~",
 }
 
-const addTaskMessage = "введи задачу в формате: задача - время, через которое напомнить о ней"
-const errMessage = "ошибка добавления задачи("
+const addTaskMessage = "о чем тебе напомнить?"
+const addTimeMessage = "введи время,через которое напомнить,в формате:\n\n- hh:mm:ss"
+const addingErrMessage = "ошибка добавления("
 const unknownCommandMessage = "такой команды нет("
-const successAddMessage = "задача успешно добавлена: "
+const successAddMessage = "успешно добавлено: "
 const notificationMessage = "пора "
+const getListMessage = "вот все твои дела:\n\n"
+const gettingListErrMessage = "ошибка получения списка дел("
+const noTasksMessage = "у тебя нет добавленных дел"
 
 const startSticker = "CAACAgIAAxkBAAEMoF9mtkhyWknPycFAHoFr_r3jjIdOCgACIRMAAqr1AAFIRBQx6LiUPhQ1BA"
 const successAddSticker = "CAACAgIAAxkBAAEMoGFmtkjyTquTfcvcjFpkbbb3WUBssQAC3z0AAospUUsQBB-1YCaT3zUE"

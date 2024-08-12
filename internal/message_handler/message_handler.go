@@ -25,8 +25,10 @@ func NewMessageHandler(token string, messageService *service.MessageService) (*M
 	u.Timeout = 10
 
 	commands := []tgbotapi.BotCommand{
-		{Command: "start", Description: "Start using notification message_handler"},
-		{Command: "add_task", Description: "Add task in queue"},
+		{Command: "start", Description: "Start using notification"},
+		{Command: "add", Description: "Add task in queue"},
+		{Command: "list", Description: "Show a list of your tasks"},
+		{Command: "cancel", Description: "Cancel adding task or time"},
 	}
 
 	setCommandsConfig := tgbotapi.NewSetMyCommands(commands...)
@@ -48,6 +50,8 @@ func NewMessageHandler(token string, messageService *service.MessageService) (*M
 
 func (mh *MessageHandler) HandleMessage() {
 	isAddingTask := false
+	isAddingTime := false
+	var task string
 
 	for update := range mh.UpdatesChannel {
 		if update.Message == nil {
@@ -58,14 +62,32 @@ func (mh *MessageHandler) HandleMessage() {
 		case "/start":
 			mh.handleStart(update.Message.Chat.ID)
 
-		case "/add_task":
+		case "/add":
 			isAddingTask = true
 			mh.handleAddTaskCommand(update.Message.Chat.ID)
 
+		case "/list":
+			mh.handleList(update.Message.Chat.ID)
+
+		case "/cancel":
+			isAddingTask = false
+			isAddingTime = false
+			task = ""
+
 		default:
-			if isAddingTask {
-				mh.handleTaskAddition(update.Message.Chat.ID, update.Message.Text)
-				isAddingTask = false
+			if isAddingTask || isAddingTime {
+				if isAddingTask {
+					mh.handleAddTimeCommand(update.Message.Chat.ID)
+					task = update.Message.Text
+					isAddingTask = false
+					isAddingTime = true
+					continue
+				}
+
+				if isAddingTime {
+					mh.handleTaskAddition(update.Message.Chat.ID, task, update.Message.Text)
+					isAddingTime = false
+				}
 			} else {
 				mh.handleUnknownCommand(update.Message.Chat.ID)
 			}
@@ -116,13 +138,21 @@ func (mh *MessageHandler) handleAddTaskCommand(chatID int64) {
 	}
 }
 
-func (mh *MessageHandler) handleTaskAddition(chatID int64, task string) {
+func (mh *MessageHandler) handleAddTimeCommand(chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, addTimeMessage)
+
+	if _, err := mh.Bot.Send(msg); err != nil {
+		log.Printf("error sending add time message: %v", err)
+	}
+}
+
+func (mh *MessageHandler) handleTaskAddition(chatID int64, task, time string) {
 	log.Printf("starting adding task - %s in queue\n", task)
 
-	err := mh.MessageService.AddTask(task, chatID)
+	err := mh.MessageService.AddTask(task, time, chatID)
 
 	if err != nil {
-		msg := tgbotapi.NewMessage(chatID, errMessage)
+		msg := tgbotapi.NewMessage(chatID, addingErrMessage)
 
 		if _, err = mh.Bot.Send(msg); err != nil {
 			log.Printf("error sending error message: %v", err)
@@ -153,5 +183,29 @@ func (mh *MessageHandler) handleUnknownCommand(chatID int64) {
 
 	if _, err := mh.Bot.Send(sticker); err != nil {
 		log.Printf("error sending unknown command sticker: %v", err)
+	}
+}
+
+func (mh *MessageHandler) handleList(chatID int64) {
+	list, err := mh.MessageService.GetTaskList(chatID)
+
+	if err != nil {
+		msg := tgbotapi.NewMessage(chatID, gettingListErrMessage)
+
+		if _, err = mh.Bot.Send(msg); err != nil {
+			log.Printf("error sending error message: %v", err)
+		}
+	} else if list != "" {
+		msg := tgbotapi.NewMessage(chatID, getListMessage+list)
+
+		if _, err := mh.Bot.Send(msg); err != nil {
+			log.Printf("error sending list of tasks: %v", err)
+		}
+	} else {
+		msg := tgbotapi.NewMessage(chatID, noTasksMessage)
+
+		if _, err := mh.Bot.Send(msg); err != nil {
+			log.Printf("error sending list of tasks: %v", err)
+		}
 	}
 }

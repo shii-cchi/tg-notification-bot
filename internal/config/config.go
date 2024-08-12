@@ -12,6 +12,11 @@ type Config struct {
 	BotToken    string
 	RabbitMQURL string
 	QueueTTLs   []int
+	DbUser      string
+	DbPassword  string
+	DbHost      string
+	DbPort      string
+	DbName      string
 }
 
 func LoadConfig() (*Config, error) {
@@ -49,9 +54,44 @@ func LoadConfig() (*Config, error) {
 		queueTTLs = append(queueTTLs, ttl)
 	}
 
+	dbUser := os.Getenv("DB_USER")
+
+	if dbUser == "" {
+		return nil, errors.New("DB_USER parameter is not defined")
+	}
+
+	dbPassword := os.Getenv("DB_PASSWORD")
+
+	if dbPassword == "" {
+		return nil, errors.New("DB_PASSWORD parameter is not defined")
+	}
+
+	dbHost := os.Getenv("DB_HOST")
+
+	if dbHost == "" {
+		return nil, errors.New("DB_HOST parameter is not defined")
+	}
+
+	dbPort := os.Getenv("DB_PORT")
+
+	if dbPort == "" {
+		return nil, errors.New("DB_PORT parameter is not defined")
+	}
+
+	dbName := os.Getenv("DB_NAME")
+
+	if dbName == "" {
+		return nil, errors.New("DB_NAME parameter is not defined")
+	}
+
 	return &Config{
 		BotToken:    botToken,
 		RabbitMQURL: rabbitMQURL,
 		QueueTTLs:   queueTTLs,
+		DbUser:      dbUser,
+		DbPassword:  dbPassword,
+		DbHost:      dbHost,
+		DbPort:      dbPort,
+		DbName:      dbName,
 	}, nil
 }
