@@ -115,27 +115,25 @@ func (ms *MessageService) updateStatus(msg model.Task) error {
 	})
 
 	if err != nil {
+		log.Printf("error getting task id: %s\n", err)
 		return err
 	}
 
 	if len(tasks) == 1 {
-		err = ms.queries.UpdateTaskStatus(context.Background(), tasks[0].ID)
+		return ms.queries.UpdateTaskStatus(context.Background(), tasks[0].ID)
+	}
 
-		if err != nil {
-			return err
-		}
-	} else {
-		for _, task := range tasks {
-			taskTimeMs, _ := parseMsgTime(task.TaskTime)
+	for _, task := range tasks {
+		taskTimeMs, _ := parseMsgTime(task.TaskTime)
 
-			elapsedTime := int(time.Now().Sub(task.CreatedAt).Milliseconds())
+		elapsedTime := int(time.Now().Sub(task.CreatedAt).Milliseconds())
 
-			if taskTimeMs <= elapsedTime {
-				err = ms.queries.UpdateTaskStatus(context.Background(), task.ID)
+		if taskTimeMs <= elapsedTime {
+			err = ms.queries.UpdateTaskStatus(context.Background(), task.ID)
 
-				if err != nil {
-					return err
-				}
+			if err != nil {
+				log.Printf("error updating task status: %s\n", err)
+				return err
 			}
 		}
 	}
@@ -147,10 +145,11 @@ func (ms *MessageService) GetTaskList(chatID int64) (string, error) {
 	list, err := ms.queries.GetAllTasks(context.Background(), chatID)
 
 	if err != nil {
+		log.Printf("error getting task list: %s\n", err)
 		return "", err
 	}
 
-	var res string
+	var builder strings.Builder
 
 	for _, task := range list {
 		taskTimeMs, _ := parseMsgTime(task.TaskTime)
@@ -159,12 +158,12 @@ func (ms *MessageService) GetTaskList(chatID int64) (string, error) {
 
 		remainingTime := (taskTimeMs - elapsedTime) / 60000
 
-		if remainingTime < 0 {
-			remainingTime = 0
+		if remainingTime <= 0 {
+			builder.WriteString(fmt.Sprintf("%s - %s (уже истекло)\n", task.Task, task.TaskTime))
+		} else {
+			builder.WriteString(fmt.Sprintf("%s - %s (через ~%d минут)\n", task.Task, task.TaskTime, remainingTime))
 		}
-
-		res += fmt.Sprintf("%s - %s (через ~%d минут)\n", task.Task, task.TaskTime, remainingTime)
 	}
 
-	return res, nil
+	return builder.String(), nil
 }

@@ -49,9 +49,8 @@ func NewMessageHandler(token string, messageService *service.MessageService) (*M
 }
 
 func (mh *MessageHandler) HandleMessage() {
-	isAddingTask := false
-	isAddingTime := false
 	var task string
+	state := StateIdle
 
 	for update := range mh.UpdatesChannel {
 		if update.Message == nil {
@@ -61,36 +60,22 @@ func (mh *MessageHandler) HandleMessage() {
 		switch update.Message.Text {
 		case "/start":
 			mh.handleStart(update.Message.Chat.ID)
+			state = StateIdle
 
 		case "/add":
-			isAddingTask = true
 			mh.handleAddTaskCommand(update.Message.Chat.ID)
+			state = StateAddingTask
 
 		case "/list":
 			mh.handleList(update.Message.Chat.ID)
+			state = StateIdle
 
 		case "/cancel":
-			isAddingTask = false
-			isAddingTime = false
+			state = StateIdle
 			task = ""
 
 		default:
-			if isAddingTask || isAddingTime {
-				if isAddingTask {
-					mh.handleAddTimeCommand(update.Message.Chat.ID)
-					task = update.Message.Text
-					isAddingTask = false
-					isAddingTime = true
-					continue
-				}
-
-				if isAddingTime {
-					mh.handleTaskAddition(update.Message.Chat.ID, task, update.Message.Text)
-					isAddingTime = false
-				}
-			} else {
-				mh.handleUnknownCommand(update.Message.Chat.ID)
-			}
+			mh.HandleDefault(update.Message.Chat.ID, update.Message.Text, &task, &state)
 		}
 	}
 }
@@ -106,44 +91,23 @@ func (mh *MessageHandler) Notify() {
 		if notification.Task != "" {
 			log.Printf("sending notification %s\n", notification.Task)
 
-			msg := tgbotapi.NewMessage(notification.ChatID, notificationMessage+notification.Task)
-
-			if _, err := mh.Bot.Send(msg); err != nil {
-				log.Printf("error sending notification message: %v", err)
-			}
+			mh.sendMessage(notification.ChatID, notificationMessage+notification.Task)
 		}
 	}
 }
 
 func (mh *MessageHandler) handleStart(chatID int64) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	msg := tgbotapi.NewMessage(chatID, startMessages[rng.Intn(len(startMessages))])
-	sticker := tgbotapi.NewSticker(chatID, tgbotapi.FileID(startSticker))
-
-	if _, err := mh.Bot.Send(msg); err != nil {
-		log.Printf("error sending start message: %v", err)
-	}
-
-	if _, err := mh.Bot.Send(sticker); err != nil {
-		log.Printf("error sending start sticker: %v", err)
-	}
+	mh.sendMessage(chatID, startMessages[rng.Intn(len(startMessages))])
+	mh.sendSticker(chatID, startSticker)
 }
 
 func (mh *MessageHandler) handleAddTaskCommand(chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, addTaskMessage)
-
-	if _, err := mh.Bot.Send(msg); err != nil {
-		log.Printf("error sending add task message: %v", err)
-	}
+	mh.sendMessage(chatID, addTaskMessage)
 }
 
 func (mh *MessageHandler) handleAddTimeCommand(chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, addTimeMessage)
-
-	if _, err := mh.Bot.Send(msg); err != nil {
-		log.Printf("error sending add time message: %v", err)
-	}
+	mh.sendMessage(chatID, addTimeMessage)
 }
 
 func (mh *MessageHandler) handleTaskAddition(chatID int64, task, time string) {
@@ -152,60 +116,62 @@ func (mh *MessageHandler) handleTaskAddition(chatID int64, task, time string) {
 	err := mh.MessageService.AddTask(task, time, chatID)
 
 	if err != nil {
-		msg := tgbotapi.NewMessage(chatID, addingErrMessage)
-
-		if _, err = mh.Bot.Send(msg); err != nil {
-			log.Printf("error sending error message: %v", err)
-		}
-
-	} else {
-		log.Printf("task - %s has been added in queue\n", task)
-		msg := tgbotapi.NewMessage(chatID, successAddMessage+task)
-		sticker := tgbotapi.NewSticker(chatID, tgbotapi.FileID(successAddSticker))
-
-		if _, err = mh.Bot.Send(msg); err != nil {
-			log.Printf("error sending success add task message: %v", err)
-		}
-
-		if _, err = mh.Bot.Send(sticker); err != nil {
-			log.Printf("error sending success add task sticker: %v", err)
-		}
+		mh.sendMessage(chatID, addingErrMessage)
+		return
 	}
+
+	log.Printf("task - %s has been added in queue\n", task)
+	mh.sendMessage(chatID, successAddMessage+task)
+	mh.sendSticker(chatID, successAddSticker)
+
 }
 
 func (mh *MessageHandler) handleUnknownCommand(chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, unknownCommandMessage)
-	sticker := tgbotapi.NewSticker(chatID, tgbotapi.FileID(unknownCommandSticker))
-
-	if _, err := mh.Bot.Send(msg); err != nil {
-		log.Printf("error sending unknown command message: %v", err)
-	}
-
-	if _, err := mh.Bot.Send(sticker); err != nil {
-		log.Printf("error sending unknown command sticker: %v", err)
-	}
+	mh.sendMessage(chatID, unknownCommandMessage)
+	mh.sendSticker(chatID, unknownCommandSticker)
 }
 
 func (mh *MessageHandler) handleList(chatID int64) {
-	list, err := mh.MessageService.GetTaskList(chatID)
+	taskList, err := mh.MessageService.GetTaskList(chatID)
 
 	if err != nil {
-		msg := tgbotapi.NewMessage(chatID, gettingListErrMessage)
+		mh.sendMessage(chatID, gettingListErrMessage)
+		return
+	}
 
-		if _, err = mh.Bot.Send(msg); err != nil {
-			log.Printf("error sending error message: %v", err)
-		}
-	} else if list != "" {
-		msg := tgbotapi.NewMessage(chatID, getListMessage+list)
-
-		if _, err := mh.Bot.Send(msg); err != nil {
-			log.Printf("error sending list of tasks: %v", err)
-		}
+	if taskList != "" {
+		mh.sendMessage(chatID, getListMessage+taskList)
 	} else {
-		msg := tgbotapi.NewMessage(chatID, noTasksMessage)
+		mh.sendMessage(chatID, noTasksMessage)
+	}
+}
 
-		if _, err := mh.Bot.Send(msg); err != nil {
-			log.Printf("error sending list of tasks: %v", err)
-		}
+func (mh *MessageHandler) HandleDefault(chatID int64, msg string, task *string, state *State) {
+	switch *state {
+	case StateAddingTask:
+		mh.handleAddTimeCommand(chatID)
+		*task = msg
+		*state = StateAddingTime
+
+	case StateAddingTime:
+		mh.handleTaskAddition(chatID, *task, msg)
+		*state = StateIdle
+
+	default:
+		mh.handleUnknownCommand(chatID)
+	}
+}
+
+func (mh *MessageHandler) sendMessage(chatID int64, text string) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	if _, err := mh.Bot.Send(msg); err != nil {
+		log.Printf("error sending message: %v", err)
+	}
+}
+
+func (mh *MessageHandler) sendSticker(chatID int64, stickerID string) {
+	sticker := tgbotapi.NewSticker(chatID, tgbotapi.FileID(stickerID))
+	if _, err := mh.Bot.Send(sticker); err != nil {
+		log.Printf("error sending sticker: %v", err)
 	}
 }

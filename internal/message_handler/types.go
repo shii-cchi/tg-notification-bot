@@ -1,5 +1,13 @@
 package message_handler
 
+type State int
+
+const (
+	StateIdle State = iota
+	StateAddingTask
+	StateAddingTime
+)
+
 var startMessages = []string{
 	"пиветики^-^",
 	"привет^^",
