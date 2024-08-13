@@ -6,6 +6,7 @@ const (
 	StateIdle State = iota
 	StateAddingTask
 	StateAddingTime
+	StateAddingInQueue
 )
 
 var startMessages = []string{
@@ -15,7 +16,7 @@ var startMessages = []string{
 }
 
 const addTaskMessage = "о чем тебе напомнить?"
-const addTimeMessage = "введи время,через которое напомнить,в формате:\n\n- hh:mm:ss"
+const addTimeMessage = "введи время"
 const addingErrMessage = "ошибка добавления("
 const unknownCommandMessage = "такой команды нет("
 const successAddMessage = "успешно добавлено: "
