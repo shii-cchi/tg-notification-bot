@@ -5,14 +5,61 @@
 package database
 
 import (
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
 	"time"
 )
+
+type TaskStatus string
+
+const (
+	TaskStatusInProgress TaskStatus = "in_progress"
+	TaskStatusCompleted  TaskStatus = "completed"
+	TaskStatusDeleted    TaskStatus = "deleted"
+)
+
+func (e *TaskStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TaskStatus(s)
+	case string:
+		*e = TaskStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TaskStatus: %T", src)
+	}
+	return nil
+}
+
+type NullTaskStatus struct {
+	TaskStatus TaskStatus
+	Valid      bool // Valid is true if TaskStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTaskStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.TaskStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TaskStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTaskStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TaskStatus), nil
+}
 
 type Task struct {
 	ID        int64
 	Task      string
 	TaskTime  string
 	ChatID    int64
-	Status    string
+	Status    TaskStatus
 	CreatedAt time.Time
+	DeletedAt sql.NullTime
 }

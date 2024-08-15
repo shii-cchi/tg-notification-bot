@@ -7,13 +7,14 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (task, task_time, chat_id, created_at)
 VALUES ($1, $2, $3, $4)
-RETURNING id, task, task_time, chat_id, status, created_at
+RETURNING id, task, task_time, chat_id, status, created_at, deleted_at
 `
 
 type CreateTaskParams struct {
@@ -38,17 +39,35 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.ChatID,
 		&i.Status,
 		&i.CreatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
+const deleteTask = `-- name: DeleteTask :exec
+UPDATE tasks
+SET status = 'deleted', deleted_at = $2
+WHERE id = $1
+`
+
+type DeleteTaskParams struct {
+	ID        int64
+	DeletedAt sql.NullTime
+}
+
+func (q *Queries) DeleteTask(ctx context.Context, arg DeleteTaskParams) error {
+	_, err := q.db.ExecContext(ctx, deleteTask, arg.ID, arg.DeletedAt)
+	return err
+}
+
 const getAllTasks = `-- name: GetAllTasks :many
-SELECT task, task_time, created_at
+SELECT id, task, task_time, created_at
 FROM tasks
 WHERE chat_id = $1 AND status = 'in_progress'
 `
 
 type GetAllTasksRow struct {
+	ID        int64
 	Task      string
 	TaskTime  string
 	CreatedAt time.Time
@@ -63,7 +82,12 @@ func (q *Queries) GetAllTasks(ctx context.Context, chatID int64) ([]GetAllTasksR
 	var items []GetAllTasksRow
 	for rows.Next() {
 		var i GetAllTasksRow
-		if err := rows.Scan(&i.Task, &i.TaskTime, &i.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.Task,
+			&i.TaskTime,
+			&i.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -119,7 +143,7 @@ func (q *Queries) GetTaskId(ctx context.Context, arg GetTaskIdParams) ([]GetTask
 
 const updateTaskStatus = `-- name: UpdateTaskStatus :exec
 UPDATE tasks
-SET status = 'done'
+SET status = 'completed'
 WHERE id = $1
 `
 

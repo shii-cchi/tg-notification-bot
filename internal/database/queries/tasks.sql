@@ -10,10 +10,15 @@ WHERE task = $1 AND chat_id = $2;
 
 -- name: UpdateTaskStatus :exec
 UPDATE tasks
-SET status = 'done'
+SET status = 'completed'
 WHERE id = $1;
 
 -- name: GetAllTasks :many
-SELECT task, task_time, created_at
+SELECT id, task, task_time, created_at
 FROM tasks
 WHERE chat_id = $1 AND status = 'in_progress';
+
+-- name: DeleteTask :exec
+UPDATE tasks
+SET status = 'deleted', deleted_at = $2
+WHERE id = $1;

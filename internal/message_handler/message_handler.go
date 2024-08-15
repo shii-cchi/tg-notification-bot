@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"tg-notification-bot/internal/model"
 	"tg-notification-bot/internal/service"
 	"time"
 )
@@ -55,24 +56,35 @@ func (mh *MessageHandler) HandleMessage() {
 	var task string
 	state := StateIdle
 	var lastMessageID int
+	var taskInfoList []model.TaskInfo
 
 	for update := range mh.UpdatesChannel {
 		if update.Message != nil {
-			mh.handleMessage(update, &task, &state, &lastMessageID)
+			mh.handleMessage(update, &task, &state, &lastMessageID, &taskInfoList)
 		} else if update.CallbackQuery != nil {
-			taskTime := mh.handlePushButton(update.CallbackQuery, &state)
+			if state == StateAddingTime {
+				taskTime := mh.handlePushTimeButton(update.CallbackQuery, &state)
 
-			if state == StateAddingInQueue {
-				mh.handleTaskAddition(update.CallbackQuery.Message.Chat.ID, update.CallbackQuery.Message.MessageID, task, taskTime)
+				if state == StateAddingInQueue {
+					mh.handleTaskAddition(update.CallbackQuery.Message.Chat.ID, update.CallbackQuery.Message.MessageID, task, taskTime)
 
-				state = StateIdle
+					state = StateIdle
+				}
+			}
+
+			if state == StateShowList {
+				mh.handlePushTaskButton(update.CallbackQuery, &state, taskInfoList)
+			}
+
+			if state == StateEditTask {
+				mh.handlePushEditTaskButton(update.CallbackQuery, &state, taskInfoList)
 			}
 		}
 	}
 }
 
-func (mh *MessageHandler) handleMessage(update tgbotapi.Update, task *string, state *State, lastMessageID *int) {
-	if *state == StateAddingTime {
+func (mh *MessageHandler) handleMessage(update tgbotapi.Update, task *string, state *State, lastMessageID *int, taskInfoList *[]model.TaskInfo) {
+	if *state == StateAddingTime || *state == StateShowList || *state == StateEditTask {
 		deleteConfig := tgbotapi.NewDeleteMessage(update.Message.Chat.ID, *lastMessageID)
 
 		if _, err := mh.Bot.Request(deleteConfig); err != nil {
@@ -92,8 +104,13 @@ func (mh *MessageHandler) handleMessage(update tgbotapi.Update, task *string, st
 		*state = StateAddingTask
 
 	case "/list":
-		mh.handleList(update.Message.Chat.ID)
-		*state = StateIdle
+		*lastMessageID, *taskInfoList = mh.handleList(update.Message.Chat.ID, 0)
+
+		if *taskInfoList == nil {
+			*state = StateIdle
+		} else {
+			*state = StateShowList
+		}
 
 	case "/cancel":
 		*state = StateIdle
@@ -112,10 +129,11 @@ func (mh *MessageHandler) handleMessage(update tgbotapi.Update, task *string, st
 	}
 }
 
-func (mh *MessageHandler) handlePushButton(callbackQuery *tgbotapi.CallbackQuery, state *State) string {
+func (mh *MessageHandler) handlePushTimeButton(callbackQuery *tgbotapi.CallbackQuery, state *State) string {
 	parts := strings.Split(callbackQuery.Data, ":")
 
 	if len(parts) != 4 {
+		log.Printf("unexpected callback data: %v", callbackQuery.Data)
 		return ""
 	}
 
@@ -124,30 +142,99 @@ func (mh *MessageHandler) handlePushButton(callbackQuery *tgbotapi.CallbackQuery
 	minutes, _ := strconv.Atoi(parts[2])
 	seconds, _ := strconv.Atoi(parts[3])
 
-	if *state == StateAddingTime {
-		switch action {
-		case "increase_hours":
-			hours = (hours + 1) % 24
-		case "increase_min":
-			minutes = (minutes + 1) % 60
-		case "increase_sec":
-			seconds = (seconds + 1) % 60
-		case "decrease_hours":
-			hours = (hours - 1 + 24) % 24
-		case "decrease_min":
-			minutes = (minutes - 1 + 60) % 60
-		case "decrease_sec":
-			seconds = (seconds - 1 + 60) % 60
-		case "confirm_time":
-			*state = StateAddingInQueue
-			return strings.Join(parts[1:], ":")
+	switch action {
+	case "increase_hours":
+		hours = (hours + 1) % 24
+	case "increase_min":
+		minutes = (minutes + 1) % 60
+	case "increase_sec":
+		seconds = (seconds + 1) % 60
+	case "decrease_hours":
+		hours = (hours - 1 + 24) % 24
+	case "decrease_min":
+		minutes = (minutes - 1 + 60) % 60
+	case "decrease_sec":
+		seconds = (seconds - 1 + 60) % 60
+	case "confirm_time":
+		*state = StateAddingInQueue
+		return strings.Join(parts[1:], ":")
+	}
+
+	newKeyboard := mh.createTimeKeyboard(hours, minutes, seconds)
+
+	editMsg := tgbotapi.NewEditMessageReplyMarkup(callbackQuery.Message.Chat.ID, callbackQuery.Message.MessageID, newKeyboard)
+	if _, err := mh.Bot.Send(editMsg); err != nil {
+		log.Printf("error updating message with new keyboard: %v", err)
+	}
+
+	callbackConfig := tgbotapi.NewCallback(callbackQuery.ID, "")
+	if _, err := mh.Bot.Request(callbackConfig); err != nil {
+		log.Printf("error sending callback confirmation: %v", err)
+	}
+
+	return ""
+}
+
+func (mh *MessageHandler) handlePushTaskButton(callbackQuery *tgbotapi.CallbackQuery, state *State, taskInfoList []model.TaskInfo) {
+	parts := strings.Split(callbackQuery.Data, "_")
+
+	if len(parts) < 2 {
+		log.Printf("unexpected callback data: %v", callbackQuery.Data)
+		return
+	}
+
+	action := parts[0]
+	value := parts[1]
+
+	switch action {
+	case "task":
+		id, err := strconv.Atoi(value)
+		if err != nil {
+			log.Printf("error converting id number: %v", err)
+			return
 		}
 
-		newKeyboard := mh.createTimeKeyboard(hours, minutes, seconds)
+		*state = StateEditTask
 
-		editMsg := tgbotapi.NewEditMessageReplyMarkup(callbackQuery.Message.Chat.ID, callbackQuery.Message.MessageID, newKeyboard)
+		keyboard := mh.createTaskKeyboard(taskInfoList[id-1].TaskID, id)
+
+		editMsg := tgbotapi.NewEditMessageTextAndMarkup(callbackQuery.Message.Chat.ID, callbackQuery.Message.MessageID, taskInfoList[id-1].TaskWithTime, keyboard)
+
 		if _, err := mh.Bot.Send(editMsg); err != nil {
-			log.Printf("error updating message with new keyboard: %v", err)
+			log.Printf("error sending edited message: %v", err)
+		}
+
+		callbackConfig := tgbotapi.NewCallback(callbackQuery.ID, "")
+		if _, err := mh.Bot.Request(callbackConfig); err != nil {
+			log.Printf("error sending callback confirmation: %v", err)
+		}
+
+	case "page":
+		page, err := strconv.Atoi(value)
+		if err != nil {
+			log.Printf("error converting page number: %v", err)
+			return
+		}
+
+		var builder strings.Builder
+
+		startIndex := page * maxTasksButton
+		endIndex := startIndex + maxTasksButton
+
+		if endIndex > len(taskInfoList) {
+			endIndex = len(taskInfoList)
+		}
+
+		for i := startIndex; i < endIndex; i++ {
+			builder.WriteString(taskInfoList[i].TaskWithTime)
+		}
+
+		keyboard := mh.createTaskListKeyboard(len(taskInfoList), page)
+
+		editMsg := tgbotapi.NewEditMessageTextAndMarkup(callbackQuery.Message.Chat.ID, callbackQuery.Message.MessageID, getListMessage+builder.String(), keyboard)
+
+		if _, err := mh.Bot.Send(editMsg); err != nil {
+			log.Printf("error sending edited message: %v", err)
 		}
 
 		callbackConfig := tgbotapi.NewCallback(callbackQuery.ID, "")
@@ -155,8 +242,86 @@ func (mh *MessageHandler) handlePushButton(callbackQuery *tgbotapi.CallbackQuery
 			log.Printf("error sending callback confirmation: %v", err)
 		}
 	}
+}
 
-	return ""
+func (mh *MessageHandler) handlePushEditTaskButton(callbackQuery *tgbotapi.CallbackQuery, state *State, taskInfoList []model.TaskInfo) {
+	parts := strings.Split(callbackQuery.Data, "_")
+
+	if len(parts) < 2 {
+		log.Printf("unexpected callback data: %v", callbackQuery.Data)
+		return
+	}
+
+	action := parts[0]
+	value := parts[1]
+
+	switch action {
+	case "delete":
+		id, err := strconv.Atoi(value)
+		if err != nil {
+			log.Printf("error converting id number: %v", err)
+			return
+		}
+
+		deleteConfig := tgbotapi.NewDeleteMessage(callbackQuery.Message.Chat.ID, callbackQuery.Message.MessageID)
+
+		if _, err = mh.Bot.Request(deleteConfig); err != nil {
+			log.Printf("error delete message: %v", err)
+		}
+
+		err = mh.MessageService.DeleteTask(int64(id))
+
+		if err != nil {
+			mh.sendMessage(callbackQuery.Message.Chat.ID, deletingTaskFailedMessage)
+		} else {
+			mh.sendMessage(callbackQuery.Message.Chat.ID, deletingTaskSuccessMessage)
+		}
+
+		*state = StateIdle
+
+		callbackConfig := tgbotapi.NewCallback(callbackQuery.ID, "")
+		if _, err := mh.Bot.Request(callbackConfig); err != nil {
+			log.Printf("error sending callback confirmation: %v", err)
+		}
+
+	case "back":
+		taskNumber, err := strconv.Atoi(value)
+		if err != nil {
+			log.Printf("error converting id number: %v", err)
+			return
+		}
+
+		page := (taskNumber - 1) / maxTasksButton
+
+		var builder strings.Builder
+
+		startIndex := page * maxTasksButton
+		endIndex := startIndex + maxTasksButton
+
+		if endIndex > len(taskInfoList) {
+			endIndex = len(taskInfoList)
+		}
+
+		for i := startIndex; i < endIndex; i++ {
+			builder.WriteString(taskInfoList[i].TaskWithTime)
+		}
+
+		keyboard := mh.createTaskListKeyboard(len(taskInfoList), page)
+
+		editMsg := tgbotapi.NewEditMessageTextAndMarkup(callbackQuery.Message.Chat.ID, callbackQuery.Message.MessageID, getListMessage+builder.String(), keyboard)
+
+		_, err = mh.Bot.Send(editMsg)
+		if err != nil {
+			log.Printf("error sending message: %v", err)
+		}
+
+		*state = StateShowList
+
+		callbackConfig := tgbotapi.NewCallback(callbackQuery.ID, "")
+		if _, err := mh.Bot.Request(callbackConfig); err != nil {
+			log.Printf("error sending callback confirmation: %v", err)
+		}
+	}
 }
 
 func (mh *MessageHandler) handleStart(chatID int64) {
@@ -210,18 +375,41 @@ func (mh *MessageHandler) handleUnknownCommand(chatID int64) {
 	mh.sendSticker(chatID, unknownCommandSticker)
 }
 
-func (mh *MessageHandler) handleList(chatID int64) {
-	taskList, err := mh.MessageService.GetTaskList(chatID)
+func (mh *MessageHandler) handleList(chatID int64, page int) (int, []model.TaskInfo) {
+	taskInfoList, err := mh.MessageService.GetTaskList(chatID)
 
 	if err != nil {
 		mh.sendMessage(chatID, gettingListErrMessage)
-		return
+		return 0, nil
 	}
 
-	if taskList != "" {
-		mh.sendMessage(chatID, getListMessage+taskList)
+	if len(taskInfoList) != 0 {
+		var builder strings.Builder
+
+		startIndex := page * maxTasksButton
+		endIndex := startIndex + maxTasksButton
+
+		if endIndex > len(taskInfoList) {
+			endIndex = len(taskInfoList)
+		}
+
+		for i := startIndex; i < endIndex; i++ {
+			builder.WriteString(taskInfoList[i].TaskWithTime)
+		}
+
+		keyboard := mh.createTaskListKeyboard(len(taskInfoList), page)
+		msg := tgbotapi.NewMessage(chatID, getListMessage+builder.String())
+		msg.ReplyMarkup = keyboard
+
+		message, err := mh.Bot.Send(msg)
+		if err != nil {
+			log.Printf("error sending message: %v", err)
+		}
+
+		return message.MessageID, taskInfoList
 	} else {
 		mh.sendMessage(chatID, noTasksMessage)
+		return 0, nil
 	}
 }
 
@@ -251,6 +439,49 @@ func (mh *MessageHandler) createTimeKeyboard(hours, minutes, seconds int) tgbota
 	confirmRow := tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("подтвердить", fmt.Sprintf("confirm_time:%s:%s:%s", h, m, s)))
 
 	return tgbotapi.NewInlineKeyboardMarkup(topRow, middleRow, bottomRow, confirmRow)
+}
+
+func (mh *MessageHandler) createTaskListKeyboard(lenList, page int) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	var row []tgbotapi.InlineKeyboardButton
+
+	startIndex := page * maxTasksButton
+	endIndex := startIndex + maxTasksButton
+	lastPage := lenList / maxTasksButton
+
+	if endIndex > lenList {
+		endIndex = lenList
+	}
+
+	for i := startIndex; i < endIndex; i++ {
+		button := tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d", i+1), fmt.Sprintf("task_%d", i+1))
+		row = append(row, button)
+	}
+
+	rows = append(rows, row)
+
+	if lenList > endIndex {
+		if page != lastPage {
+			nextPageButton := tgbotapi.NewInlineKeyboardButtonData("далее", fmt.Sprintf("page_%d", page+1))
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(nextPageButton))
+		}
+	}
+
+	if page != 0 {
+		prevPageButton := tgbotapi.NewInlineKeyboardButtonData("назад", fmt.Sprintf("page_%d", page-1))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(prevPageButton))
+	}
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+func (mh *MessageHandler) createTaskKeyboard(id int64, taskNumber int) tgbotapi.InlineKeyboardMarkup {
+	row := tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("удалить", fmt.Sprintf("delete_%d", id)),
+		tgbotapi.NewInlineKeyboardButtonData("назад", fmt.Sprintf("back_%d", taskNumber)),
+	)
+
+	return tgbotapi.NewInlineKeyboardMarkup(row)
 }
 
 func (mh *MessageHandler) Notify() {

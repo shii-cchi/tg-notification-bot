@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"strconv"
@@ -141,29 +142,46 @@ func (ms *MessageService) updateStatus(msg model.Task) error {
 	return nil
 }
 
-func (ms *MessageService) GetTaskList(chatID int64) (string, error) {
-	list, err := ms.queries.GetAllTasks(context.Background(), chatID)
+func (ms *MessageService) GetTaskList(chatID int64) ([]model.TaskInfo, error) {
+	taskList, err := ms.queries.GetAllTasks(context.Background(), chatID)
 
 	if err != nil {
 		log.Printf("error getting task list: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
-	var builder strings.Builder
+	taskInfoList := make([]model.TaskInfo, len(taskList))
 
-	for _, task := range list {
+	for i, task := range taskList {
 		taskTimeMs, _ := parseMsgTime(task.TaskTime)
 
 		elapsedTime := int(time.Now().UTC().Sub(task.CreatedAt).Milliseconds())
 
 		remainingTime := (taskTimeMs - elapsedTime) / 60000
 
+		taskInfoList[i].TaskID = task.ID
+
 		if remainingTime <= 0 {
-			builder.WriteString(fmt.Sprintf("%s - %s (уже истекло)\n", task.Task, task.TaskTime))
+			taskInfoList[i].TaskWithTime = fmt.Sprintf("%d) %s - %s (уже истекло)\n", i+1, task.Task, task.TaskTime)
 		} else {
-			builder.WriteString(fmt.Sprintf("%s - %s (через ~%d минут)\n", task.Task, task.TaskTime, remainingTime))
+			taskInfoList[i].TaskWithTime = fmt.Sprintf("%d) %s - %s (через ~%d минут)\n", i+1, task.Task, task.TaskTime, remainingTime)
 		}
 	}
 
-	return builder.String(), nil
+	return taskInfoList, nil
+}
+
+func (ms *MessageService) DeleteTask(id int64) error {
+	deletedAt := sql.NullTime{
+		Time:  time.Now().UTC(),
+		Valid: true,
+	}
+
+	err := ms.queries.DeleteTask(context.Background(), database.DeleteTaskParams{ID: id, DeletedAt: deletedAt})
+
+	if err != nil {
+		log.Printf("error deleting task: %s\n", err)
+	}
+
+	return err
 }
