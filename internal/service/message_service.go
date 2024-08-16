@@ -127,13 +127,11 @@ func (ms *MessageService) updateStatus(msg model.Task) error {
 	for _, task := range tasks {
 		taskTimeMs, _ := parseMsgTime(task.TaskTime)
 
-		elapsedTime := int(time.Now().Sub(task.CreatedAt).Milliseconds())
+		elapsedTime := int(time.Since(task.CreatedAt).Milliseconds())
 
 		if taskTimeMs <= elapsedTime {
-			err = ms.queries.UpdateTaskStatus(context.Background(), task.ID)
-
-			if err != nil {
-				log.Printf("error updating task status: %s\n", err)
+			if err = ms.queries.UpdateTaskStatus(context.Background(), task.ID); err != nil {
+				log.Printf("error updating status for task ID '%d': %v", task.ID, err)
 				return err
 			}
 		}
@@ -155,16 +153,19 @@ func (ms *MessageService) GetTaskList(chatID int64) ([]model.TaskInfo, error) {
 	for i, task := range taskList {
 		taskTimeMs, _ := parseMsgTime(task.TaskTime)
 
-		elapsedTime := int(time.Now().UTC().Sub(task.CreatedAt).Milliseconds())
+		elapsedTime := int(time.Since(task.CreatedAt).Milliseconds())
 
 		remainingTime := (taskTimeMs - elapsedTime) / 60000
 
-		taskInfoList[i].TaskID = task.ID
+		remainingTimeMsg := fmt.Sprintf("через ~%d минут", remainingTime)
 
 		if remainingTime <= 0 {
-			taskInfoList[i].TaskWithTime = fmt.Sprintf("%d) %s - %s (уже истекло)\n", i+1, task.Task, task.TaskTime)
-		} else {
-			taskInfoList[i].TaskWithTime = fmt.Sprintf("%d) %s - %s (через ~%d минут)\n", i+1, task.Task, task.TaskTime, remainingTime)
+			remainingTimeMsg = "уже истекло"
+		}
+
+		taskInfoList[i] = model.TaskInfo{
+			TaskID:       task.ID,
+			TaskWithTime: fmt.Sprintf("%d) %s - %s (%s)\n", i+1, task.Task, task.TaskTime, remainingTimeMsg),
 		}
 	}
 
@@ -177,11 +178,5 @@ func (ms *MessageService) DeleteTask(id int64) error {
 		Valid: true,
 	}
 
-	err := ms.queries.DeleteTask(context.Background(), database.DeleteTaskParams{ID: id, DeletedAt: deletedAt})
-
-	if err != nil {
-		log.Printf("error deleting task: %s\n", err)
-	}
-
-	return err
+	return ms.queries.DeleteTask(context.Background(), database.DeleteTaskParams{ID: id, DeletedAt: deletedAt})
 }

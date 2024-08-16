@@ -7,9 +7,9 @@ import (
 	"log"
 	"tg-notification-bot/internal/config"
 	"tg-notification-bot/internal/database"
-	"tg-notification-bot/internal/message_handler"
 	"tg-notification-bot/internal/rabbitmq"
 	"tg-notification-bot/internal/service"
+	"tg-notification-bot/internal/update_handler"
 )
 
 func RunBot() {
@@ -39,7 +39,7 @@ func RunBot() {
 
 	messageService := service.NewMessageService(rabbit, queries)
 
-	messageHandler, err := message_handler.NewMessageHandler(cfg.BotToken, messageService)
+	messageHandler, err := update_handler.NewMessageHandler(cfg.BotToken, messageService)
 
 	if err != nil {
 		log.Fatal("error creating bot")
@@ -50,5 +50,5 @@ func RunBot() {
 
 	go messageHandler.Notify()
 
-	messageHandler.HandleMessage()
+	messageHandler.HandleUpdate()
 }
