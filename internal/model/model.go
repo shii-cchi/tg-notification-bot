@@ -5,7 +5,9 @@ import (
 )
 
 type Task struct {
+	ID         int64
 	Task       string
+	TaskTime   string
 	ChatID     int64
 	TaskTimeMs int
 	CreatedAt  time.Time

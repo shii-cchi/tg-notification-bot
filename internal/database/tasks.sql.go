@@ -101,44 +101,21 @@ func (q *Queries) GetAllTasks(ctx context.Context, chatID int64) ([]GetAllTasksR
 	return items, nil
 }
 
-const getTaskId = `-- name: GetTaskId :many
-SELECT id, task_time, created_at
+const isDeletedTask = `-- name: IsDeletedTask :one
+SELECT
+    CASE
+        WHEN status = 'deleted' THEN TRUE
+        ELSE FALSE
+    END AS is_deleted
 FROM tasks
-WHERE task = $1 AND chat_id = $2
+WHERE id = $1
 `
 
-type GetTaskIdParams struct {
-	Task   string
-	ChatID int64
-}
-
-type GetTaskIdRow struct {
-	ID        int64
-	TaskTime  string
-	CreatedAt time.Time
-}
-
-func (q *Queries) GetTaskId(ctx context.Context, arg GetTaskIdParams) ([]GetTaskIdRow, error) {
-	rows, err := q.db.QueryContext(ctx, getTaskId, arg.Task, arg.ChatID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetTaskIdRow
-	for rows.Next() {
-		var i GetTaskIdRow
-		if err := rows.Scan(&i.ID, &i.TaskTime, &i.CreatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) IsDeletedTask(ctx context.Context, id int64) (bool, error) {
+	row := q.db.QueryRowContext(ctx, isDeletedTask, id)
+	var is_deleted bool
+	err := row.Scan(&is_deleted)
+	return is_deleted, err
 }
 
 const updateTaskStatus = `-- name: UpdateTaskStatus :exec

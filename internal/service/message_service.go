@@ -33,25 +33,11 @@ func (ms *MessageService) AddTask(msg, msgTime string, chatID int64) error {
 		return err
 	}
 
-	createdAt := time.Now()
-
-	err = ms.rabbitService.Publish(model.Task{
-		Task:       msg,
-		ChatID:     chatID,
-		TaskTimeMs: taskTimeMs,
-		CreatedAt:  createdAt,
-	})
-
-	if err != nil {
-		log.Printf("error publishing message: %s\n", err)
-		return err
-	}
-
-	_, err = ms.queries.CreateTask(context.Background(), database.CreateTaskParams{
+	taskDB, err := ms.queries.CreateTask(context.Background(), database.CreateTaskParams{
 		Task:      msg,
 		TaskTime:  msgTime,
 		ChatID:    chatID,
-		CreatedAt: createdAt.UTC(),
+		CreatedAt: time.Now().UTC(),
 	})
 
 	if err != nil {
@@ -60,6 +46,20 @@ func (ms *MessageService) AddTask(msg, msgTime string, chatID int64) error {
 	}
 
 	log.Printf("task %s has been successfully added into db\n", msg)
+
+	err = ms.rabbitService.Publish(model.Task{
+		ID:         taskDB.ID,
+		Task:       msg,
+		TaskTime:   msgTime,
+		ChatID:     chatID,
+		TaskTimeMs: taskTimeMs,
+		CreatedAt:  taskDB.CreatedAt,
+	})
+
+	if err != nil {
+		log.Printf("error publishing message: %s\n", err)
+		return err
+	}
 
 	return nil
 }
@@ -72,12 +72,25 @@ func (ms *MessageService) GetNotification() model.Task {
 		return model.Task{}
 	}
 
-	if msg.Task != "" {
-		err = ms.updateStatus(msg)
+	if msg.Task == "" {
+		return model.Task{}
+	}
 
-		if err != nil {
-			log.Printf("error updating task status: %s\n", err)
-		}
+	isDeleted, err := ms.queries.IsDeletedTask(context.Background(), msg.ID)
+
+	if err != nil {
+		log.Printf("error checking if task is deleted: %s\n", err)
+		return model.Task{}
+	}
+
+	if isDeleted {
+		log.Printf("task with ID %d is deleted, skipping processing\n", msg.ID)
+		return model.Task{}
+	}
+
+	if err = ms.updateStatus(msg); err != nil {
+		log.Printf("error updating task status: %s\n", err)
+		return model.Task{}
 	}
 
 	return msg
@@ -110,30 +123,14 @@ func parseMsgTime(msgTime string) (int, error) {
 }
 
 func (ms *MessageService) updateStatus(msg model.Task) error {
-	tasks, err := ms.queries.GetTaskId(context.Background(), database.GetTaskIdParams{
-		Task:   msg.Task,
-		ChatID: msg.ChatID,
-	})
+	taskTimeMs, _ := parseMsgTime(msg.TaskTime)
 
-	if err != nil {
-		log.Printf("error getting task id: %s\n", err)
-		return err
-	}
+	elapsedTime := int(time.Since(msg.CreatedAt).Milliseconds())
 
-	if len(tasks) == 1 {
-		return ms.queries.UpdateTaskStatus(context.Background(), tasks[0].ID)
-	}
-
-	for _, task := range tasks {
-		taskTimeMs, _ := parseMsgTime(task.TaskTime)
-
-		elapsedTime := int(time.Since(task.CreatedAt).Milliseconds())
-
-		if taskTimeMs <= elapsedTime {
-			if err = ms.queries.UpdateTaskStatus(context.Background(), task.ID); err != nil {
-				log.Printf("error updating status for task ID '%d': %v", task.ID, err)
-				return err
-			}
+	if taskTimeMs <= elapsedTime {
+		if err := ms.queries.UpdateTaskStatus(context.Background(), msg.ID); err != nil {
+			log.Printf("error updating status for task ID '%d': %v", msg.ID, err)
+			return err
 		}
 	}
 
