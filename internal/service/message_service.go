@@ -159,7 +159,7 @@ func (ms *MessageService) GetTaskList(chatID int64) ([]model.TaskInfo, error) {
 
 		remainingTimeMsg := fmt.Sprintf("через ~%d минут", remainingTime)
 
-		if remainingTime <= 0 {
+		if remainingTime < 0 {
 			remainingTimeMsg = "уже истекло"
 		}
 
