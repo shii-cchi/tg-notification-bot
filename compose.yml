@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'pg_isready -U ${DB_USER} -d ${DB_NAME}'"]
+      interval: 10s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "${DB_PORT}:${DB_PORT}"
+    networks:
+      - bot_network
+
+  rabbitmq:
+    image: rabbitmq:management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "${RABBITMQ_UI_PORT}:${RABBITMQ_UI_PORT}"
+      - "${RABBITMQ_PORT}:${RABBITMQ_PORT}"
+    networks:
+      - bot_network
+    restart: always
+
+  notification-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DB_URI: postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable
+    container_name: notification-bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - bot_network
+    restart: always
+
+networks:
+  bot_network:
+    external: true

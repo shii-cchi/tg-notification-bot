@@ -10,7 +10,10 @@ import (
 
 type Config struct {
 	BotToken    string
-	RabbitMQURL string
+	RabbitMQDefaultUser string
+	RabbitMQDefaultPass string
+	RabbitMQHost string
+	RabbitMQPort string
 	QueueTTLs   []int
 	DbUser      string
 	DbPassword  string
@@ -32,10 +35,28 @@ func LoadConfig() (*Config, error) {
 		return nil, errors.New("BOT_TOKEN parameter is not defined")
 	}
 
-	rabbitMQURL := os.Getenv("RABBIT_MQ_URL")
+	rabbitMQDefaultUser := os.Getenv("RABBITMQ_DEFAULT_USER")
 
-	if rabbitMQURL == "" {
-		return nil, errors.New("RABBIT_MQ_URL parameter is not defined")
+	if rabbitMQDefaultUser == "" {
+		return nil, errors.New("RABBITMQ_DEFAULT_USER parameter is not defined")
+	}
+
+	rabbitMQDefaultPass := os.Getenv("RABBITMQ_DEFAULT_PASS")
+
+	if rabbitMQDefaultPass == "" {
+		return nil, errors.New("RABBITMQ_DEFAULT_PASS parameter is not defined")
+	}
+
+	rabbitMQHost := os.Getenv("RABBITMQ_HOST")
+
+	if rabbitMQHost == "" {
+		return nil, errors.New("RABBITMQ_HOST parameter is not defined")
+	}
+
+	rabbitMQPort := os.Getenv("RABBITMQ_PORT")
+
+	if rabbitMQPort == "" {
+		return nil, errors.New("RABBITMQ_PORT parameter is not defined")
 	}
 
 	queueTTLsStr := os.Getenv("QUEUE_TTLS")
@@ -86,7 +107,10 @@ func LoadConfig() (*Config, error) {
 
 	return &Config{
 		BotToken:    botToken,
-		RabbitMQURL: rabbitMQURL,
+		RabbitMQDefaultUser: rabbitMQDefaultUser,
+		RabbitMQDefaultPass: rabbitMQDefaultPass,
+		RabbitMQHost: rabbitMQHost,
+		RabbitMQPort: rabbitMQPort,
 		QueueTTLs:   queueTTLs,
 		DbUser:      dbUser,
 		DbPassword:  dbPassword,

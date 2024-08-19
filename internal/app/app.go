@@ -21,7 +21,7 @@ func RunBot() {
 
 	log.Println("config has been loaded successfully")
 
-	rabbit, err := rabbitmq.InitRabbit(cfg.RabbitMQURL, cfg.QueueTTLs)
+	rabbit, err := rabbitmq.InitRabbit(fmt.Sprintf("amqp://%s:%s@%s:%s/", cfg.RabbitMQDefaultUser, cfg.RabbitMQDefaultPass, cfg.RabbitMQHost, cfg.RabbitMQPort), cfg.QueueTTLs)
 
 	if err != nil {
 		log.Fatalf("error init rabbitmq: %s\n", err)

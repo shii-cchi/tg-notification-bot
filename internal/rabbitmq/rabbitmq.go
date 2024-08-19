@@ -23,7 +23,7 @@ func InitRabbit(url string, queueTTLs []int) (*Rabbit, error) {
 	conn, err := amqp.Dial(url)
 
 	if err != nil {
-		return nil, errors.New("failed to connect to RabbitMQ")
+		return nil, fmt.Errorf("failed to connect to RabbitMQ %s\n", err)
 	}
 
 	ch, err := conn.Channel()
